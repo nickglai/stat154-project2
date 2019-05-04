@@ -1,0 +1,745 @@
+---
+title: "Project 2 - https://github.com/nickglai/stat154-project2"
+author: "Andrew Rall, Nicholas Lai"
+date: "April 24, 2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, warning = FALSE)
+```
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(plyr)
+library(caret)
+library(plotROC)
+library(ROCit)
+library(MASS)
+library(drat)
+library(xgboost)
+library(tidyverse)
+library(GGally)
+library(reshape2)
+library(corrplot)
+library(gridExtra)
+library(ggpubr)
+#setwd("C:/Users/andre/Desktop/Stat154/project2")
+```
+
+```{r}
+image1 = read.csv('image_data/image1.txt', header=FALSE, sep = "", col.names = c("y", "x", "label", "NDAI", "SD", "CORR", "RADF", "RACF", "RABF", "RAAF", "RAAN"))
+image2 = read.csv('image_data/image2.txt', header=FALSE, sep = "", col.names = c("y", "x", "label", "NDAI", "SD", "CORR", "RADF", "RACF", "RABF", "RAAF", "RAAN"))
+image3 = read.csv('image_data/image3.txt', header=FALSE, sep = "", col.names = c("y", "x", "label", "NDAI", "SD", "CORR", "RADF", "RACF", "RABF", "RAAF", "RAAN"))
+
+image1["log_SD"] = log(image1$SD)
+image2["log_SD"] = log(image2$SD)
+image3["log_SD"] = log(image3$SD)
+```
+
+
+## 1. Data Collection and Exploration
+
+### 1a.
+
+The aim of this study was to create a sufficiently accurate classification algorithm to distinguish between clouds and arctic ice in image data from the Terra satellite's sophisticated sensor array without the need for constant expert labeling. The image data was collected by the MISR onboard Terra, which through observations of regions of interest from multiple angles is able to generate highly detailed and accurate reflected sunlight readings from the earth's surface. The data was collected in data units containing 7,114,248 1.1 kilometer pixels, and the data considered contains 57 such units. Each pixel of the images contains additional information about relative information about location, relevant engineered features, and the radiance angles of the MISR cameras while the image was taken, and was given true labels in post by expert opinion in order to perform validation. The study concluded that three engineered features were sufficient to distinguish between arctic ice and clouds in image data more accurately than the previous standard method using even very simple classifiers, simplifying the data processing workflow for the MISR output. data This study demonstrates the potential that statistical solutions have for complex scientific problems, and also provides more accurate cloud detection data that can be used by scientists tracking hurricanes, climate patterns, and anything else that depends on the pattern of clouds over the earth.
+
+### 1b.
+
+Proportion of pixels for each class all images
+
+```{r}
+all_images = rbind(image1, image2, image3)
+prop.table(table(all_images$label))
+```
+
+
+
+```{r, fig.height = 3}
+image1_plot = ggplot(image1, aes(x=x, y=y, color=factor(label))) + geom_point() + scale_color_manual(values=c("grey", "black", "white")) + ggtitle("Image1")
+image2_plot = ggplot(image2, aes(x=x, y=y, color=factor(label))) + geom_point() + scale_color_manual(values=c("grey", "black", "white")) + ggtitle("Image2")
+image3_plot = ggplot(image3, aes(x=x, y=y, color=factor(label))) + geom_point() + scale_color_manual(values=c("grey", "black", "white")) + ggtitle("Image3")
+ggarrange(image1_plot, image2_plot, image3_plot, common.legend = TRUE)
+```
+
+
+For each of the images, each of the pixel classes tend to clump together. Intuitively, a cloud is going to occupy mupliple pixels, so if a pixel is known to be a cloud pixel, then all adjacent pixels are more likely to be cloud pixels as well. This means that an i.i.d assumption is not justified for this dataset.
+
+### 1c.
+
+```{r}
+image1_features = subset(image1, select = -c(label))
+image2_features = subset(image2, select = -c(label))
+image3_features = subset(image3, select = -c(label))
+```
+
+```{r, fig.height = 3}
+par(mfrow = c(2, 2))
+corrplot(cor(image1))
+corrplot(cor(image2))
+corrplot(cor(image3))
+par(mfrow = c(1, 1))
+```
+
+
+```{r, message=FALSE}
+image1_means = melt(summarise_all(group_by(image1, label), "mean"))
+image1_means["sd"] = melt(summarise_all(group_by(image1, label), "sd"))$value
+image1_means["label"] = rep(c(-1, 0, 1), 12)
+image1_means = image1_means[-c(1, 2, 3),]
+#image1_means
+```
+```{r}
+summarise_all(group_by(image1, label), "mean")
+```
+
+```{r}
+summarise_all(group_by(image2, label), "mean")
+```
+
+```{r}
+summarise_all(group_by(image3, label), "mean")
+```
+
+```{r}
+ndai = ggplot(image1_means[c(7, 8, 9),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("NDAI")
+sd = ggplot(image1_means[c(10, 11, 12),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("SD")
+corr = ggplot(image1_means[c(13, 14, 15),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("CORR")
+radf = ggplot(image1_means[c(16, 17, 18),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("RADF")
+racf = ggplot(image1_means[c(19, 20, 21),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("RACF")
+rabf = ggplot(image1_means[c(22, 23, 24),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("RABF")
+raaf = ggplot(image1_means[c(25, 26, 27),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("RAAF")
+raan = ggplot(image1_means[c(28, 29, 30),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("RAAN")
+log_SD = ggplot(image1_means[c(28, 29, 30),], aes(x=variable, y=value, fill=factor(label))) + geom_bar(stat="identity", position="dodge") + geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.2,position=position_dodge(.9)) + ggtitle("log_SD")
+ggarrange(ndai, sd, corr, radf, racf, rabf, raaf, raan, log_SD, common.legend = TRUE)
+```
+
+
+NDAI is significantlly smaller for not clouds. SD is reasonably smaller for not clouds. CORR is slightly smaller for not clouds. The radiances appear to be slightly larger for not clouds.
+
+
+---
+
+## 2. Preparation
+
+### 2a.
+
+To split the data into train, validation, and test sets we will construct boundaries (essentially forming a checkerboard) for each of the three images. We will then randomly assign squares of our checkerboard such that one section has 60% of the data as our train set, 20% of the data as our validation set, and the remaining 20% will be our test set. The thinking behind this strategy is that the points are not i.i.d. so randomly assigning a point to the train, val, or test set would cause a problem. If it is known that a point is a cloud, then all of the surrounding points are more likely to be cloud points as well (this also holds for the other two classes). Because of this phenomenon, splitting the images such that most points retain their spatial neighbors helps address the issue of spatial dependence. An alternative method to construct boundaries would be to simply introduce two lines to each image, segmenting it into three parts with a 60/20/20 ratio. It should be noted that the left border of each image is not a vertical line so some of the squares will not actually be squares. I will now construct a 5x5 checkerboard for each image.
+
+#### Split Method 1: Checkerboard
+
+Construct 25 Image1 squares:
+
+```{r}
+image1_y_lower_vals = c(2, 78, 154, 230, 306)
+image1_y_upper_vals = c(78, 154, 230, 306, 384)
+
+image1_x_lower_boundaries = rep(c(65, 126, 187, 248, 309), 5)
+image1_x_upper_boundaries = rep(c(126, 187, 248, 309, 370), 5)
+image1_y_lower_boundaries = rep(image1_y_lower_vals, each=5)
+image1_y_upper_boundaries = rep(image1_y_upper_vals, each=5)
+
+for (i in 1:25){
+  name = paste("image1_square", as.character(i), sep="")
+  assign(name, filter(image1, x >= image1_x_lower_boundaries[i] & 
+                        x < image1_x_upper_boundaries[i] & 
+                        y >= image1_y_lower_boundaries[i] & 
+                        y < image1_y_upper_boundaries[i]))
+}
+```
+
+Construct 25 Image2 squares:
+
+```{r}
+image2_y_lower_vals = c(2, 78, 154, 230, 306)
+image2_y_upper_vals = c(78, 154, 230, 306, 384)
+
+image2_x_lower_boundaries = rep(c(65, 126, 187, 248, 309), 5)
+image2_x_upper_boundaries = rep(c(126, 187, 248, 309, 369), 5)
+image2_y_lower_boundaries = rep(image2_y_lower_vals, each=5)
+image2_y_upper_boundaries = rep(image2_y_upper_vals, each=5)
+
+for (i in 1:25){
+  name = paste("image2_square", as.character(i), sep="")
+  assign(name, filter(image2, x >= image2_x_lower_boundaries[i] & 
+                        x < image2_x_upper_boundaries[i] & 
+                        y >= image2_y_lower_boundaries[i] & 
+                        y < image2_y_upper_boundaries[i]))
+}
+```
+
+
+Construct 25 Image3 squares:
+
+```{r}
+image3_y_lower_vals = c(2, 78, 154, 230, 306)
+image3_y_upper_vals = c(78, 154, 230, 306, 384)
+
+image3_x_lower_boundaries = rep(c(65, 126, 187, 248, 309), 5)
+image3_x_upper_boundaries = rep(c(126, 187, 248, 309, 370), 5)
+image3_y_lower_boundaries = rep(image3_y_lower_vals, each=5)
+image3_y_upper_boundaries = rep(image3_y_upper_vals, each=5)
+
+for (i in 1:25){
+  name = paste("image3_square", as.character(i), sep="")
+  assign(name, filter(image3, x >= image3_x_lower_boundaries[i] & 
+                        x < image3_x_upper_boundaries[i] & 
+                        y >= image3_y_lower_boundaries[i] & 
+                        y < image3_y_upper_boundaries[i]))
+}
+```
+
+
+Put all squares into list:
+
+```{r}
+image_squares = list()
+
+for (x in 1:3) {
+  for (i in 1:25) {
+    image_squares[[paste("image", as.character(x), "_square", as.character(i), sep="")]] = get(paste("image", as.character(x), "_square", as.character(i), sep=""))
+  }
+}
+```
+
+Randomly select 45 for Train, 15 for Valid, 15 for test:
+
+```{r}
+set.seed(1)
+split_sample = sample(c(rep(1, 45), rep(2, 15), rep(3, 15)))
+train_list = image_squares[split_sample == 1]
+valid_list = image_squares[split_sample == 2]
+test_list = image_squares[split_sample == 3]
+```
+
+
+```{r}
+train = do.call("rbind", train_list)
+valid = do.call("rbind", valid_list)
+test = do.call("rbind", test_list)
+```
+
+Partition of Three Images:
+
+```{r}
+image1_part = ggplot(image1, aes(x=x, y=y, color=factor(label))) + 
+  geom_point() + 
+  scale_color_manual(values=c("grey", "black", "white")) + 
+  ggtitle("Image1") + 
+  geom_vline(xintercept=c(65, 126, 187, 248, 309, 370), color="red") + 
+  geom_hline(yintercept=c(2, 78, 154, 230, 306, 384), color="red")
+
+image2_part = ggplot(image2, aes(x=x, y=y, color=factor(label))) + 
+  geom_point() + 
+  scale_color_manual(values=c("grey", "black", "white")) + 
+  ggtitle("Image2") + 
+  geom_vline(xintercept=c(65, 126, 187, 248, 309, 369), color="red") + 
+  geom_hline(yintercept=c(2, 78, 154, 230, 306, 384), color="red")
+
+image3_part = ggplot(image3, aes(x=x, y=y, color=factor(label))) + 
+  geom_point() + 
+  scale_color_manual(values=c("grey", "black", "white")) + 
+  ggtitle("Image3") + 
+  geom_vline(xintercept=c(65, 126, 187, 248, 309, 370), color="red") + 
+  geom_hline(yintercept=c(2, 78, 154, 230, 306, 384), color="red")
+
+ggarrange(image1_part, image2_part, image3_part, common.legend = TRUE)
+```
+
+#### Split Method 2: Two Lines of Separation
+
+```{r}
+alt_image1_train = image1[image1$x <= 250,]
+alt_image1_val = image1[(image1$x > 250) & (image1$y > 190),]
+alt_image1_test = image1[(image1$x > 250) & (image1$y <= 190),]
+
+alt_image2_train = image2[image2$x <= 250,]
+alt_image2_val = image2[(image2$x > 250) & (image2$y > 190),]
+alt_image2_test = image2[(image2$x > 250) & (image2$y <= 190),]
+
+alt_image3_train = image3[image3$x <= 250,]
+alt_image3_val = image3[(image3$x > 250) & (image3$y > 190),]
+alt_image3_test = image3[(image3$x > 250) & (image3$y <= 190),]
+
+alt_train = rbind(alt_image1_train, alt_image2_train, alt_image3_train)
+alt_valid = rbind(alt_image1_val, alt_image2_val, alt_image3_val)
+alt_test = rbind(alt_image1_test, alt_image2_test, alt_image3_test)
+```
+
+We will partition the image with two lines, splitting it into 60/20/20 rectangles. The logic for this is on previously discussed lines.
+
+```{r}
+#train = alt_train
+#valid = alt_valid
+#test = alt_test
+```
+
+
+### 2b.
+
+Trivial Classifier that classifies all points as -1 (not cloud).
+
+Valid Accuracy:
+
+```{r}
+sum(valid$label == -1)/nrow(valid)
+```
+
+Test Accuracy:
+
+```{r}
+sum(test$label == -1)/nrow(test)
+```
+
+The above classifier would have a very high accuracy if a very high proportion of the points were -1 (not cloud), but that was not the case with this data.
+
+### 2c.
+
+NDAI looks like fairly separate distributions in our train set.
+
+```{r, message=FALSE}
+ndai_hist = ggplot(train, aes(x=NDAI, color=factor(label))) +
+  geom_histogram(alpha=0.5, position = "identity")
+
+log_sd_hist = ggplot(train, aes(x=log(SD), color=factor(label))) +
+  geom_histogram(alpha=0.5, position="identity", binwidth = .1, aes(y=..count../sum(..count..)))
+
+corr_hist = ggplot(train, aes(x=CORR, color=factor(label))) +
+  geom_histogram(alpha=0.5, position="identity")
+
+radf_hist = ggplot(train, aes(x=RADF, color=factor(label))) +
+  geom_histogram(alpha=0.5, position="identity")
+
+racf_hist = ggplot(train, aes(x=RACF, color=factor(label))) +
+  geom_histogram(alpha=0.5, position="identity")
+
+rabf_hist = ggplot(train, aes(x=RABF, color=factor(label))) +
+  geom_histogram(alpha=0.5, position="identity")
+
+raaf_hist = ggplot(train, aes(x=RAAF, color=factor(label))) +
+  geom_histogram(alpha=0.5, position="identity")
+
+raan_hist = ggplot(train, aes(x=RAAN, color=factor(label))) +
+  geom_histogram(alpha=0.5, position="identity")
+
+ggarrange(ndai_hist, log_sd_hist, corr_hist, radf_hist, racf_hist, rabf_hist, raaf_hist, raan_hist, common.legend=TRUE)
+```
+
+
+NDAI and log(SD) are the only two features that appear to have very different distributions. I will use the correlation matrix to determine the third feature to use.
+
+```{r}
+temp = abs(cor(train[-c(1, 2)]))
+temp = as.data.frame(temp)
+colnames(temp)[sort(temp$label, index.return=TRUE, decreasing=TRUE)$ix[2:4]]
+```
+
+Our 3 best features are NDAI, log_SD, and CORR.
+
+
+### 2d.
+
+For the purposes of this problem, the 0 class (unlabeled) is not relevant so I will drop all entries of this class and then encode the -1 class (not cloud) as 0 to make the next steps easier. Thus, **0 is our class for not cloud and 1 is our class for cloud**. The `CVGeneric` function is in the code portion of our repository.
+
+
+```{r}
+rownames(train) = NULL
+unlabeled_index = as.integer(rownames(train[train$label == 0,]))
+train = train[-unlabeled_index,]
+train$label[train$label == -1] = 0
+
+rownames(valid) = NULL
+unlabeled_index = as.integer(rownames(valid[valid$label == 0,]))
+valid = valid[-unlabeled_index,]
+valid$label[valid$label == -1] = 0
+
+rownames(test) = NULL
+unlabeled_index = as.integer(rownames(test[test$label == 0,]))
+test = test[-unlabeled_index,]
+test$label[test$label == -1] = 0
+```
+
+
+```{r}
+
+train_list_01 = list()
+
+for (i in 1:length(train_list)) {
+  x = train_list[[i]]
+  
+  if (sum(x$label == 0) != 0) {
+    unlabeled_index = as.integer(rownames(x[x$label == 0,]))
+    x = x[-unlabeled_index,]
+  }
+  
+  x$label[x$label == -1] = 0
+  train_list_01[[i]] = x
+}
+
+valid_list_01 = list()
+
+for (i in 1:length(valid_list)) {
+  x = valid_list[[i]]
+  
+  if (sum(x$label == 0) != 0) {
+    unlabeled_index = as.integer(rownames(x[x$label == 0,]))
+    x = x[-unlabeled_index,]
+  }
+  
+  x$label[x$label == -1] = 0
+  valid_list_01[[i]] = x
+}
+
+test_list_01 = list()
+
+for (i in 1:length(test_list)) {
+  x = test_list[[i]]
+  
+  if (sum(x$label == 0) != 0) {
+    unlabeled_index = as.integer(rownames(x[x$label == 0,]))
+    x = x[-unlabeled_index,]
+  }
+  
+  x$label[x$label == -1] = 0
+  test_list_01[[i]] = x
+}
+```
+
+```{r}
+accuracy = function(y_pred, y_act){
+  return(sum(y_pred == y_act)/length(y_pred))
+}
+
+all_0 = function(features){
+  return(rep(0, nrow(features)))
+}
+
+labels_list = list()
+
+for (x in 1:45) {
+  labels_list[[x]] = train_list_01[[x]][[3]]
+}
+
+features_list = list()
+
+for (x in 1:45) {
+  features_list[[x]] = train_list_01[[x]][-3]
+}
+```
+
+
+```{r}
+CVgeneric = function(classifier="all_0", features=features_list, labels=labels_list, K=5, loss=accuracy){
+  scores = c()
+  fold = 1
+
+  for (x in 1:K) {
+    cv_train_features = do.call("rbind", features_list[-seq(9*fold - 8, 9*fold)])
+    cv_test_features = do.call("rbind", features_list[seq(9*fold - 8, 9*fold)])
+    
+    cv_train_labels = unlist(labels_list[-seq(9*fold - 8, 9*fold)])
+    cv_test_labels = unlist(labels_list[seq(9*fold - 8, 9*fold)])
+    
+    
+    cv_train_features$label = cv_train_labels
+    cv_test_features$label = cv_test_labels
+
+    if (classifier == "all_0") {
+      pred = all_0(cv_test_features)
+    }
+    
+    if (classifier == "logistic") {
+      model = glm(data=cv_train_features, formula = label ~ NDAI + log_SD + CORR, family = binomial(link="logit"))
+      pred = round(predict(model, newdata=cv_test_features, type="response"))
+    }
+    
+    if (classifier == "lda") {
+      lda = lda(formula = label ~ NDAI + log_SD + CORR, data = cv_train_features)
+      pred_probs = predict(lda, newdata = cv_test_features, type="response")
+      pred = as.integer(pred_probs$class) - 1
+    }
+    
+    if (classifier == "qda") {
+      qda = qda(formula = label ~ NDAI + log_SD + CORR, data = cv_train_features)
+      pred_probs = predict(qda, newdata = cv_test_features, type="response")
+      pred = as.integer(pred_probs$class) - 1
+    }
+    
+    
+    if (classifier == "xgboost") {
+      xgboost = xgboost(data = as.matrix(cv_train_features[,c("NDAI", "log_SD", "CORR")]), label = as.matrix(cv_train_features$label), max.depth = 5, eta = 1,
+                        nrounds = 2, objective = "binary:logistic", verbose = 0)
+      pred_probs = predict(xgboost, newdata = as.matrix(cv_test_features[,c("NDAI", "log_SD", "CORR")]), type="response")
+      pred = round(pred_probs)
+    }
+    
+    actual = cv_test_labels
+    scores = c(scores, accuracy(pred, actual))
+    fold = fold + 1
+  }
+  print("Accuracy for each of K Folds:")
+  return(scores)
+}
+```
+
+---
+
+## 3. Modeling
+
+### 3a. 
+
+#### Model 1: Logistic Regression
+
+The assumptions of logistic regression are as follows: Independent Observations, No Multicolinearity of features, Large Sample Size,Linearity of features and log-odds
+
+Our observations are not independent. Knowledge of relative position will give information about the pixels within a vicinity of each other, as clouds tend to be continuous in space. Our features are not multicolinear. The paper describes how the three features were motivated and calculated, and they do not remotely encode the same information. An examination of the above plots of the distributions of the variables confirm this. The sample is the number of pixels in the training subset, which are of a considerable number (n=122124). The linearity of features and log-odds is hard to verify, but we can do so indirectly by seeing the performance of the model.
+
+```{r}
+CVgeneric(classifier="logistic")
+```
+
+```{r}
+log_reg = glm(data = train, formula = label ~ NDAI + log_SD + CORR, family = binomial(link="logit"))
+pred_probs = predict(log_reg, newdata = test, type="response")
+logistic_probs <- pred_probs
+logistic_test_act = test$label
+logistic_test_pred = round(pred_probs)
+#confusionMatrix(table(logistic_test_pred, logistic_test_act))
+```
+
+We can see from the reported confusion matrix that the model has a 91% accuracy in prediction, 84% precision, and 95% recall on the test data. This standard of performance is very high, far better than the benchmark trivial classifier, and is a promising sign that the paper's conclusion that the three engineered features are sufficient for the classification problem. 
+
+#### Model 2: LDA
+
+The assumptions of LDA are as follows:
+
+* Normality of features (by group), No multicolinearity, Independent observations, Homoskedasticity (equal covariances), large sample size
+
+Of the assumptions not discussed previously: The features, as seen on the data exploration plots, are not heavily skewed, even when broken into seperate labels. We transformed the `sd` variables with the logarithm in order to meet this assumption. Homoskedasticity is reasonable but not quite true from the same plots, but LDA should not be overly sensitive to slight violations of this assumption. 
+
+```{r}
+CVgeneric(classifier = "lda")
+```
+
+```{r}
+lda = lda(formula = label ~ NDAI + log_SD + CORR, data = train)
+pred_probs = predict(lda, newdata = test, type="response")
+lda_probs <- pred_probs$posterior[,2]
+lda_test_act = test$label
+lda_test_pred = as.integer(pred_probs$class) - 1
+#confusionMatrix(table(lda_test_pred, lda_test_act))
+```
+
+We can see from the reported confusion matrix that the model has a 92% accuracy in prediction, 88% precision, and 94.5% recall on the test data. This standard of performance is very high, far better than the benchmark trivial classifier, and is a promising sign that the paper's conclusion that the three engineered features are sufficient for the classification problem. 
+
+
+#### Model 3: QDA
+
+The only difference in LDA and QDA assumption is on the variances, where QDA has a slightly relaxed assumption on the covariances. The discussion of the validity of these assumptions is in the LDA section.
+
+```{r}
+CVgeneric(classifier = "qda", K=5)
+```
+
+```{r}
+qda = qda(formula = label ~ NDAI + log_SD + CORR, data = train)
+pred_probs = predict(qda, newdata = test, type="response")
+qda_probs <- pred_probs$posterior[,2]
+qda_test_act = test$label
+qda_test_pred = as.integer(pred_probs$class) - 1
+#confusionMatrix(table(qda_test_pred, qda_test_act))
+```
+
+We can see from the reported confusion matrix that the model has a 93.5% accuracy in prediction, 91% precision, and 95% recall on the test data. This standard of performance is very high, far better than the benchmark trivial classifier, and is a promising sign that the paper's conclusion that the three engineered features are sufficient for the classification problem. 
+
+#### Model 4: XGBoost
+
+Here we are using a boosting algorithm with a logistic loss function. This means that the assumptions of this model are shared with logistic regression, with the added caveat that the initial weak learner not be overfit, to produce meaningful improvement over iterations. This is taken care of in the XGBoost algorithm.
+
+
+```{r}
+CVgeneric(classifier = "xgboost")
+```
+
+```{r, message=FALSE}
+xgboost = xgboost(data = as.matrix(train[,c("NDAI", "log_SD", "CORR")]), label = as.matrix(train$label), max.depth = 5, eta = 1, nrounds = 2, objective = "binary:logistic", verbose = 0)
+pred_probs = predict(xgboost, newdata = as.matrix(test[,c("NDAI", "log_SD", "CORR")]), type="response")
+xgboost_probs <- pred_probs
+xgboost_test_act = test$label
+xgboost_test_pred = round(pred_probs)
+#confusionMatrix(table(xgboost_test_pred, xgboost_test_act))
+```
+
+We can see from the reported confusion matrix that the model has a 93% accuracy in prediction, 92% precision, and 96.5% recall on the test data. This standard of performance is very high, far better than the benchmark trivial classifier, and is a promising sign that the paper's conclusion that the three engineered features are sufficient for the classification problem. 
+
+### 3b.
+
+The cutoff values in the following plots were chosen in accordance with Youden's J statistic. This statistic is calculated as $precision+recall-1$, and it is plotted at the point where the distance from the ROC curve to the chance line is equal to J statistic.
+
+Logistic
+```{r, fig.width=5, fig.height = 3}
+plot(rocit(score=logistic_probs, class=logistic_test_act))
+```
+
+LDA
+```{r, fig.width=5, fig.height = 3}
+plot(rocit(score=lda_probs, class=lda_test_act))
+```
+
+QDA
+```{r, fig.width=5, fig.height = 3}
+plot(rocit(score=qda_probs, class=qda_test_act))
+```
+
+XGBoost
+```{r, fig.width=5, fig.height = 3}
+plot(rocit(score=xgboost_probs, class=xgboost_test_act))
+```
+
+All the ROC curves show that the classifiers perform well, with XGBoost claiming a small edge in performance.
+
+### 3c.
+
+See output of confusion matrix on test sets above.
+
+## 4. Diagnostics
+
+### a.
+
+We are going to examine the performance of the logistic regression model in-depth. Many diagnostics are contained within the summary output of our logistic regression model: 
+
+```{r}
+summary(log_reg)
+```
+
+Here, we see that the null deviance (the deviance of the model with intercept only) is nearly twice as high as the residual deviance, the analog of RSS in logistic regression. This means that the model is giving us a lot of meaningful information about the class of the data. The Fischer scoring algorithm is a slight modification of Newton's method for calculating the MLE estimates of the logistic regression coefficients, with hessian of the log likelyhood function being replaced by its expectation. Since in the case of logistic regression it never depended on `y` in the first place, the two methods are the same. The algorithm converged quickly, in five iterations. The estimated parameters of our logistic regression model are all very significant, with the probability that the true value of each being zero being less than 0.001 percent under model assumptions by a z-test against that null hypothesis. This is strong evidence that all parameters in our model are important in the classification problem.
+
+Examning plots of true labels versus predicted probability:
+
+```{r, fig.width=3, fig.height = 2}
+hist(logistic_probs[test$label==0], main = "Predicted Values - True Label 0", xlab = "Predicted Value")
+hist(logistic_probs[test$label==1], main = "Predicted Values - True Label 1", xlab = "Predicted Value")
+```
+
+We can see from the above plots that the logistic classifier is giving distributionally meaningfully distinct predicted values by the true class labels, so the classifier is performing well (in agreement with the ROC curve).
+
+### 4b.
+
+The models tested in Question 3 have about the same predictive power, so for continuity we will examine trends in the misclassification of logistic regression.
+```{r}
+logistic_test <- test
+logistic_test$correct <- rep(0,length(logistic_probs))
+logistic_test$correct[logistic_test_act == logistic_test_pred] <- 1
+nrow(logistic_test[logistic_test$correct ==0,])
+```
+
+In order to see if there are trends in the misclassified data, we plot histograms overlaying the distribution of variables stratified by correct/incorrectly classified. We begin by examining the three variables involved in fitting the model.
+
+```{r, fig.width = 5, fig.height = 2}
+plot1<- ggplot(logistic_test, aes(x=NDAI, color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 0.1)
+plot2 <- ggplot(logistic_test, aes(x=log(SD), color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 0.1)
+plot3 <- ggplot(logistic_test, aes(x=CORR, color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 0.05)
+ggarrange(plot1,plot2,plot3, common.legend = TRUE)
+```
+
+Graphically, there is at most weak evidence of a trend in misclassification in terms of these three variables. The distributions seem consistent between correctly and incorrectly classified variables. We can perform a t-test on CORR values (The only one that has a bit of non-overlap) to confirm this quantitatively:
+
+```{r}
+t.test(logistic_test$CORR[logistic_test$correct == 1], logistic_test$CORR[logistic_test$correct == 0])
+```
+
+The t-test shows that there is a difference of means, but on the scale of the data this difference is small. 
+
+Now we will check if there is misclassification bias in the variables not considered in the regression model. We begin as we did before with similarly constructed plots.
+
+```{r, fig.width=5, fig.height = 2}
+plot1 <- ggplot(logistic_test, aes(x=x, color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 10)
+plot2 <- ggplot(logistic_test, aes(x=y, color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 10)
+ggarrange(plot1,plot2, common.legend = TRUE)
+```
+
+There does not appear to be a trend in misclassification in the location of the pixels on the images when splitting the data by rectangles. The distributions are overlaid on top of one another.
+
+### 4c.
+
+Based on the above examination's conclusions, there is no evidence to believe that the model will perform poorly on future unlabeled data. There are no notable trends in misclassification error, and the predictive power as discussed in question 3 is high (80-90%+ in both precision and recall, and overall accuracy).
+
+Because of these facts, there is no obvious better classifier. 
+
+### 4d.
+
+We will now evaluate the performance of the model trained on the alternate 60/20/20 split of the data. The Fischer Scoring iterations take one more step to converge, which is not a significant difference. The parameters all remain significant, however.
+```{r}
+#train = alt_train
+#valid = alt_valid
+#test = alt_test
+```
+
+```{r}
+rownames(alt_train) = NULL
+unlabeled_index = as.integer(rownames(alt_train[alt_train$label == 0,]))
+alt_train = alt_train[-unlabeled_index,]
+alt_train$label[alt_train$label == -1] = 0
+
+rownames(alt_test) = NULL
+unlabeled_index = as.integer(rownames(alt_test[alt_test$label == 0,]))
+alt_test = alt_test[-unlabeled_index,]
+alt_test$label[alt_test$label == -1] = 0
+```
+
+```{r}
+log_reg_alt = glm(data = alt_train, formula = label ~ NDAI + log_SD + CORR, family = binomial(link="logit"))
+pred_probs = predict(log_reg_alt, newdata = alt_test, type="response")
+logistic_probs_alt <- pred_probs
+logistic_test_act_alt = alt_test$label
+logistic_test_pred_alt = round(pred_probs)
+```
+
+```{r}
+#summary(log_reg_alt)
+```
+
+```{r}
+logistic_test_alt <- alt_test
+logistic_test_alt$correct <- rep(0,length(logistic_probs_alt))
+logistic_test_alt$correct[logistic_test_act_alt == logistic_test_pred_alt] <- 1
+```
+
+```{r, fig.width=5, fig.height = 3}
+plot1 <- ggplot(logistic_test_alt, aes(x=NDAI, color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 0.1)
+
+plot2 <- ggplot(logistic_test_alt, aes(x=log(SD), color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 0.1)
+
+plot3 <- ggplot(logistic_test_alt, aes(x=CORR, color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 0.05)
+
+ggarrange(plot1,plot2,plot3, common.legend = TRUE)
+```
+
+Higher values of SD and NDAI are associated with misclassification error.
+
+
+```{r, fig.width=5, fig.height = 2}
+plot1 <- ggplot(logistic_test_alt, aes(x=x, color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 10)
+
+plot2 <- ggplot(logistic_test_alt, aes(x=y, color=factor(correct))) +
+  geom_histogram(alpha=0.5, position = "identity", binwidth = 10)
+
+ggarrange(plot1,plot2, common.legend = TRUE)
+```
+
+This splitting of the data seems to have a big trend in misclassification error at low values of y. This makes intuitive sense, because the split is less geometrically random than the previous method of splitting.
+
+### 4e. Conclusions
+The biggest takeaway from our analysis has been that, as per the paper's conclusions, the three features engineered, `SD`, `CORR`, and `NDAI`, are sufficient to accurately classify the vast majority of pixels. No matter the method used, the classifiers trained on these three features have above 80% in both precision and recall, as well as accuracy. However, as the above analysis shows, some care must be taken on how the data is split to dodge systematic error. A naive split of the data with two lines produced a trend in miscalssification error towards low y-values, high `SD`, and high `NDAI`. The more robust split into sectors has very little trend in misclassification error. Time to convergence is fast in any case for logistic regression, and as the parameters are all significant to the model. 
+

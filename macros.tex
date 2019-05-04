@@ -1,0 +1,78 @@
+%!TEX root = EM_singular_models.tex
+
+% PDF margin etc settings
+\setlength{\textwidth}{\paperwidth}
+\addtolength{\textwidth}{-6cm}
+\setlength{\textheight}{\paperheight}
+\addtolength{\textheight}{-4cm}
+\addtolength{\textheight}{-1.1\headheight}
+\addtolength{\textheight}{-\headsep}
+\addtolength{\textheight}{-\footskip}
+\setlength{\oddsidemargin}{0.5cm}
+\setlength{\evensidemargin}{0.5cm}
+
+\long\def\comment#1{}
+\definecolor{battleshipgrey}{rgb}{0.52, 0.52, 0.51}
+\definecolor{darkgray}{rgb}{0.66, 0.66, 0.66}
+\definecolor{darkgreen}{rgb}{0.0, 0.2, 0.13}
+\definecolor{darkspringgreen}{rgb}{0.09, 0.45, 0.27}
+\definecolor{dukeblue}{rgb}{0.0, 0.0, 0.61}
+\definecolor{olivedrab7}{rgb}{0.24, 0.2, 0.12}
+\definecolor{darkblue}{rgb}{0.0, 0.0, 0.55}
+\definecolor{darkscarlet}{rgb}{0.34, 0.01, 0.1}
+\definecolor{candyapplered}{rgb}{1.0, 0.03, 0.0}
+\definecolor{ao(english)}{rgb}{0.0, 0.5, 0.0}
+\definecolor{applegreen}{rgb}{0.55, 0.71, 0.0}
+\definecolor{orange}{rgb}{1.0, 0.65, 0.0}
+
+\newcommand{\sol}[1]{{\bf{{\blue{{\\ \textbf{Ans.} #1}}}}}}
+
+\newcommand{\red}[1]{\textcolor{red}{#1}}
+\newcommand{\blue}[1]{\textcolor{blue}{#1}}
+\newcommand{\green}[1]{\textcolor{green}{#1}}
+\newcommand{\orange}[1]{\textcolor{orange}{#1}}
+\newcommand{\highlight}[1]{\textcolor{applegreen}{#1}}
+
+\newcommand{\rdcomment}[1]{{\bf{{\red{{RD --- #1}}}}}}
+\newcommand{\yccomment}[1]{{\bf{{\orange{{YC --- #1}}}}}}
+
+\renewcommand{\vec}[1]{\mathbf{#1}}
+\newcommand{\mat}[1]{\mathbf{#1}}
+
+% Basic Math notations
+% Dimension etc.
+\newcommand{\dims}{\ensuremath{d}}
+\newcommand{\real}{\ensuremath{\mathbb{R}}}
+\newcommand{\naturalnum}{\ensuremath{\mathbb{N}}}
+\newcommand{\Ind}{\ensuremath{\mathbb{I}}}
+% Probability
+\newcommand{\borel}{\ensuremath{\mathcal{B}}}
+\newcommand{\lebesgue}{\ensuremath{\mathfrak{L}}}
+\newcommand{\powerset}{\ensuremath{\mathfrak{P}}}
+\newcommand{\lebesguemeasure}{\ensuremath{\lambda}}
+\newcommand{\ball}{\ensuremath{\mathbb{B}}}
+\newcommand{\Exs}{\ensuremath{{\mathbb{E}}}}
+\newcommand{\Prob}{\ensuremath{{\mathbb{P}}}}
+\newcommand{\Law}{\mathcal{L}}
+\newcommand{\Normal}{\ensuremath{\mathcal{N}}}
+\newcommand{\Ber}{\ensuremath{\mbox{Ber}}}
+\newcommand{\Ent}{\text{Ent}}
+\newcommand{\Var}{\text{Var}}
+
+
+% Brackets
+\newcommand{\brackets}[1]{\left[ #1 \right]}
+\newcommand{\parenth}[1]{\left( #1 \right)}
+\newcommand{\bigparenth}[1]{\big( #1 \big)}
+\newcommand{\biggparenth}[1]{\bigg( #1 \bigg)}
+\newcommand{\braces}[1]{\left\{ #1 \right \}}
+\newcommand{\abss}[1]{\left| #1 \right |}
+\newcommand{\angles}[1]{\left\langle #1 \right \rangle}
+\newcommand{\ceils}[1]{\left\lceil #1 \right \rceil}
+\newcommand{\floors}[1]{\left\lfloor #1 \right \rfloor}
+\newcommand{\tp}{^\top}
+
+% Some vector/matrix norms
+\newcommand{\matnorm}[3]{|\!|\!| #1 | \! | \!|_{{#2}, {#3}}}
+\newcommand{\matsnorm}[2]{\left|\!\left|\!\left| #1 \right|\!\right|\!\right|_{{#2}}}
+\newcommand{\vecnorm}[2]{\left\| #1\right\|_{#2}}
